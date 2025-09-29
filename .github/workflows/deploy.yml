@@ -21,8 +21,8 @@ jobs:
 
       - name: Install SAM CLI
         run: |
-          sudo pip install aws-sam-cli
-
+          sudo pip install aws-sam-cli --ignore-installed
+        
       - name: Build SAM application
         run: sam build
 
