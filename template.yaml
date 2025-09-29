@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: MTG Trades list backend lambda
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: nodejs20.x
+    Architectures:
+      - x86_64
+
+Parameters:
+  PublicKeySecretArn:
+    Type: String
+    Description: ARN of the public key secret in Secrets Manager
+
+  PrivateKeySecretArn:
+    Type: String
+    Description: ARN of the private key secret in Secrets Manager
+
+  ExistingCardsTableName:
+    Type: String
+    Description: Name of the existing DynamoDB table (e.g. cardsTable)
+
+Resources:
+  AppFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: cardsApiFunction
+      Handler: src/lambda.handler
+      CodeUri: .
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ExistingCardsTableName
+          JWT_PUBLIC_KEY_SECRET_ARN: !Ref PublicKeySecretArn
+          JWT_PRIVATE_KEY_SECRET_ARN: !Ref PrivateKeySecretArn
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Ref PublicKeySecretArn
+                - !Ref PrivateKeySecretArn
+
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ExistingCardsTableName}
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/"
+
+  FunctionName:
+    Value: !Ref AppFunction
