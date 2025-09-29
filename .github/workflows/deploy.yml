@@ -36,5 +36,6 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               PublicKeySecretArn=${{ secrets.PUBLIC_KEY_ARN}} \
-              PrivateKeySecretArn=${{ secrets.PRIVATE_KEY_ARN}}
+              PrivateKeySecretArn=${{ secrets.PRIVATE_KEY_ARN}} \
+              JwtBasicAuthSecretArn=${{ secrets.JWT_CREDENTIALS_SECRET_ARN}} \
               ExistingCardsTableName=cardsTable

@@ -18,6 +18,10 @@ Parameters:
     Type: String
     Description: ARN of the private key secret in Secrets Manager
 
+  JwtBasicAuthSecretArn:
+    Type: String
+    Description: ARN of the basic auth secret in Secrets Manager
+
   ExistingCardsTableName:
     Type: String
     Description: Name of the existing DynamoDB table (e.g. cardsTable)
@@ -40,6 +44,7 @@ Resources:
           TABLE_NAME: !Ref ExistingCardsTableName
           JWT_PUBLIC_KEY_SECRET_ARN: !Ref PublicKeySecretArn
           JWT_PRIVATE_KEY_SECRET_ARN: !Ref PrivateKeySecretArn
+          JWT_CREDENTIALS_SECRET_ARN: !Ref JwtBasicAuthSecretArn
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -49,6 +54,7 @@ Resources:
               Resource:
                 - !Ref PublicKeySecretArn
                 - !Ref PrivateKeySecretArn
+                - !Ref JwtBasicAuthSecretArn
 
             - Effect: Allow
               Action:
