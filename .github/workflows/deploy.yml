@@ -35,6 +35,6 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              PublicKeySecretArn=arn:aws:secretsmanager:eu-central-1:581968564381:secret:jwt/publicKey-kloN0n \
-              PrivateKeySecretArn=arn:aws:secretsmanager:eu-central-1:581968564381:secret:jwt/privateKey-Nta3zX \
+              PublicKeySecretArn=${{ secrets.PUBLIC_KEY_ARN}} \
+              PrivateKeySecretArn=${{ secrets.PRIVATE_KEY_ARN}}
               ExistingCardsTableName=cardsTable

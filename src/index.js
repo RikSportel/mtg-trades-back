@@ -33,6 +33,18 @@ async function getPrivateKey() {
   return cachedPrivateKey;
 }
 
+// Helper to fetch credentials from AWS Secrets Manager
+const credentialsArn = process.env.JWT_CREDENTIALS_SECRET_ARN;
+let cachedCredentials = null;
+async function getCredentials() {
+  if (cachedCredentials) return cachedCredentials;
+  const client = new SecretsManagerClient({ region: 'eu-central-1' });
+  const command = new GetSecretValueCommand({ SecretId: credentialsArn });
+  const response = await client.send(command);
+  cachedCredentials = JSON.parse(response.SecretString);
+  return cachedCredentials;
+}
+
 // Endpoint to generate a JWT token for testing
 app.get('/gettoken', async (req, res) => {
   // Basic Auth check
@@ -43,12 +55,12 @@ app.get('/gettoken', async (req, res) => {
   const base64Credentials = authHeader.split(' ')[1];
   const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
   const [username, password] = credentials.split(':');
-  if (username !== 'riksportel' || password !== 'password123') {
-    return res.status(403).json({ error: 'Invalid credentials' });
-  }
-
   try {
-    const jwtUsername = req.query.username || 'testuser';
+    const secret = await getCredentials();
+    if (username !== secret.username || password !== secret.password) {
+      return res.status(403).json({ error: 'Invalid credentials' });
+    }
+    const jwtUsername = secret.username;
     const privateKey = await getPrivateKey();
     const token = jwt.sign(
       { username: jwtUsername, permissions: ['CARD_EDITOR'] },
