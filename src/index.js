@@ -108,11 +108,11 @@ const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.get('/api-docs/swagger.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(swaggerSpec);
-});
+}); 
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 //app.listen(port, () => {
 //  console.log(`MTG backend listening on port ${port}`);
 //});
-mosdule.exports = app;
+module.exports = app;
