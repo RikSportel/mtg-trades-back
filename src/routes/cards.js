@@ -36,6 +36,7 @@ function isScryfallExpired(card) {
  * @swagger
  * /cards/{setCode}/{cardNumber}/{foil}:
  *   get:
+ *     operationId: getCard
  *     summary: Get card info by setCode, cardNumber, and foil
  *     parameters:
  *       - in: path
@@ -91,6 +92,7 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  * @swagger
  * /cards/{setCode}/{cardNumber}/{foil}:
  *   post:
+ *     operationId: createCard
  *     summary: Create or increment card (protected)
  *     security:
  *       - bearerAuth: []
@@ -177,6 +179,7 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
  * @swagger
  * /cards/{setCode}/{cardNumber}/{foil}:
  *   patch:
+ *     operationId: updateCard
  *     summary: Update card amount (protected)
  *     security:
  *       - bearerAuth: []
@@ -255,6 +258,7 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
  * @swagger
  * /cards/{setCode}/{cardNumber}/{foil}:
  *   delete:
+ *     operationId: deleteCard
  *     summary: Delete card (protected)
  *     security:
  *       - bearerAuth: []
@@ -305,6 +309,7 @@ router.delete('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res)
  * @swagger
  * /cards:
  *   get:
+ *     operationId: getAllCards
  *     summary: Get all cards
  *     responses:
  *       200:
