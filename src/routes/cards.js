@@ -132,9 +132,12 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
 // POST: Create or increment card (protected)
 router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
   const { setCode, cardNumber, foil } = req.params;
-  let { amount = 1 } = req.body;
+  // If req.body is missing or amount is not provided, default to 1
+  let amount = 1;
+  if (req.body && typeof req.body.amount !== 'undefined') {
+    amount = Number(req.body.amount);
+  }
   const foilBool = foil === 'true';
-  amount = Number(amount);
   const validationError = validateCardInput(setCode, cardNumber, foilBool, amount);
   if (validationError) return res.status(400).json({ error: validationError });
   const key = getKey(setCode, cardNumber, foilBool);
@@ -221,6 +224,10 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
 // PATCH: Update amount (protected)
 router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
   const { setCode, cardNumber, foil } = req.params;
+  // Body is mandatory
+  if (!req.body || typeof req.body.amount === 'undefined') {
+    return res.status(400).json({ error: 'Request body with amount is required' });
+  }
   let { amount } = req.body;
   const foilBool = foil === 'true';
   amount = Number(amount);
