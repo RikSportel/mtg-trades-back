@@ -4,6 +4,8 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const { fetchScryfallCard } = require('./middleware/scryfall');
+const swaggerJsdoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -88,8 +90,23 @@ app.get('/card/:setCode/:cardNumber', async (req, res) => {
   res.send(cardData || { error: 'Card not found' });
 });
 
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'MTG Trades API',
+      version: '1.0.0',
+      description: 'API documentation for MTG Trades backend',
+    },
+  },
+  apis: ['./src/routes/*.js'], // Path to your route files
+};
 
-//app.listen(port, () => {
-//  console.log(`MTG backend listening on port ${port}`);
-//});
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+app.listen(port, () => {
+  console.log(`MTG backend listening on port ${port}`);
+});
 module.exports = app;

@@ -32,6 +32,33 @@ function isScryfallExpired(card) {
   return Date.now() > card.scryfall_ttl;
 }
 
+/**
+ * @swagger
+ * /cards/{setCode}/{cardNumber}/{foil}:
+ *   get:
+ *     summary: Get card info by setCode, cardNumber, and foil
+ *     parameters:
+ *       - in: path
+ *         name: setCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: cardNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: foil
+ *         required: true
+ *         schema:
+ *           type: boolean
+ *     responses:
+ *       200:
+ *         description: Card info
+ *       404:
+ *         description: Card not found
+ */
 // GET: Return card info, refresh Scryfall if expired
 router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
   const { setCode, cardNumber, foil } = req.params;
@@ -60,6 +87,46 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /cards/{setCode}/{cardNumber}/{foil}:
+ *   post:
+ *     summary: Create or increment card (protected)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: setCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: cardNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: foil
+ *         required: true
+ *         schema:
+ *           type: boolean
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               amount:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Card updated
+ *       201:
+ *         description: Card created
+ *       400:
+ *         description: Invalid input
+ */
 // POST: Create or increment card (protected)
 router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
   const { setCode, cardNumber, foil } = req.params;
@@ -106,6 +173,48 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
   }
 });
 
+/**
+ * @swagger
+ * /cards/{setCode}/{cardNumber}/{foil}:
+ *   patch:
+ *     summary: Update card amount (protected)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: setCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: cardNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: foil
+ *         required: true
+ *         schema:
+ *           type: boolean
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               amount:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Card updated
+ *       204:
+ *         description: Card deleted
+ *       400:
+ *         description: Invalid input
+ *       404:
+ *         description: Card not found
+ */
 // PATCH: Update amount (protected)
 router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
   const { setCode, cardNumber, foil } = req.params;
@@ -142,6 +251,35 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
   }
 });
 
+/**
+ * @swagger
+ * /cards/{setCode}/{cardNumber}/{foil}:
+ *   delete:
+ *     summary: Delete card (protected)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: setCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: cardNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: foil
+ *         required: true
+ *         schema:
+ *           type: boolean
+ *     responses:
+ *       204:
+ *         description: Card deleted
+ *       404:
+ *         description: Card not found
+ */
 // DELETE: Remove card (protected)
 router.delete('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
   const { setCode, cardNumber, foil } = req.params;
@@ -163,6 +301,15 @@ router.delete('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res)
   }
 });
 
+/**
+ * @swagger
+ * /cards:
+ *   get:
+ *     summary: Get all cards
+ *     responses:
+ *       200:
+ *         description: A list of cards
+ */
 // Export all cards as JSON
 router.get('/', async (req, res) => {
   try {
