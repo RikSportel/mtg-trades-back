@@ -14,7 +14,8 @@ const SCRYFALL_TTL_HOURS = 24;
 
 // Helper to get DynamoDB key
 function getKey(setCode, cardNumber, foil) {
-  return `${setCode}:${cardNumber}:${foil ? 'foil' : 'nonfoil'}`;
+  // Ensure setCode is always lowercase
+  return `${setCode.toLowerCase()}:${cardNumber}:${foil ? 'foil' : 'nonfoil'}`;
 }
 
 // Helper to validate input
@@ -38,19 +39,23 @@ function isScryfallExpired(card) {
  *   get:
  *     operationId: getCard
  *     summary: Get card info by setCode, cardNumber, and foil
+ *     description: Call this function to return a single card object in the collection. You need the setcode, cardnumber and foil status (true or false).
  *     parameters:
  *       - in: path
  *         name: setCode
+ *         description: The set code of the card (e.g., "KHM")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: cardNumber
+ *         description: The card number within the set (e.g., "123")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: foil
+ *         description: Whether the card is foil (true) or non-foil (false)
  *         required: true
  *         schema:
  *           type: boolean
@@ -62,7 +67,9 @@ function isScryfallExpired(card) {
  */
 // GET: Return card info, refresh Scryfall if expired
 router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
-  const { setCode, cardNumber, foil } = req.params;
+  // Ensure setCode is lowercase
+  const setCode = req.params.setCode.toLowerCase();
+  const { cardNumber, foil } = req.params;
   const key = getKey(setCode, cardNumber, foil === 'true');
   try {
     const result = await dynamoDb.send(new GetCommand({
@@ -94,21 +101,25 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  *   post:
  *     operationId: createCard
  *     summary: Create or increment card (protected)
+ *     description: Call this function to add a new card to the collection, or increment the amount if it already exists. If the card is new, Scryfall data will be fetched automatically. You can optionally provide an "amount" in the request body to specify how many copies to add (default is 1). You must pass card number, set code and foil status (true or false) as path parameters.
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: setCode
+ *         description: The set code of the card (e.g., "KHM")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: cardNumber
+ *         description: The card number within the set (e.g., "123")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: foil
+ *         description: Whether the card is foil (true) or non-foil (false)
  *         required: true
  *         schema:
  *           type: boolean
@@ -121,6 +132,7 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  *             properties:
  *               amount:
  *                 type: integer
+ *                 description: Number of copies of the card to add to the collection (default is 1)
  *     responses:
  *       200:
  *         description: Card updated
@@ -131,7 +143,9 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  */
 // POST: Create or increment card (protected)
 router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
-  const { setCode, cardNumber, foil } = req.params;
+  // Ensure setCode is lowercase
+  const setCode = req.params.setCode.toLowerCase();
+  const { cardNumber, foil } = req.params;
   // If req.body is missing or amount is not provided, default to 1
   let amount = 1;
   if (req.body && typeof req.body.amount !== 'undefined') {
@@ -184,22 +198,26 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
  *   patch:
  *     operationId: updateCard
  *     summary: Update card amount (protected)
+ *     description: Call this function to update the amount of a specific card in the collection. You must provide the new "amount" in the request body. Setting the amount to 0 will delete the card from the collection. You must pass setcode, cardnumber and foil status (true or false) as path parameters.
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: setCode
+ *         description: The set code of the card (e.g., "KHM")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: cardNumber
+ *         description: The card number within the set (e.g., "123")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: foil
  *         required: true
+ *         description: Whether the card is foil (true) or non-foil (false)
  *         schema:
  *           type: boolean
  *     requestBody:
@@ -211,6 +229,7 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
  *             properties:
  *               amount:
  *                 type: integer
+ *                 description: New amount, set to 0 to delete the card. This is the number of copies available of the
  *     responses:
  *       200:
  *         description: Card updated
@@ -223,7 +242,9 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
  */
 // PATCH: Update amount (protected)
 router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
-  const { setCode, cardNumber, foil } = req.params;
+  // Ensure setCode is lowercase
+  const setCode = req.params.setCode.toLowerCase();
+  const { cardNumber, foil } = req.params;
   // Body is mandatory
   if (!req.body || typeof req.body.amount === 'undefined') {
     return res.status(400).json({ error: 'Request body with amount is required' });
@@ -267,21 +288,25 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
  *   delete:
  *     operationId: deleteCard
  *     summary: Delete card (protected)
+ *     description: Call this function to delete a specific card from the collection. You need to pass card number, set code and foil status (true or false) as path parameters.
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: setCode
+ *         description: The set code of the card (e.g., "KHM")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: cardNumber
+ *         description: The card number within the set (e.g., "123")
  *         required: true
  *         schema:
  *           type: string
  *       - in: path
  *         name: foil
+ *         description: Whether the card is foil (true) or non-foil (false)
  *         required: true
  *         schema:
  *           type: boolean
@@ -293,7 +318,9 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
  */
 // DELETE: Remove card (protected)
 router.delete('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
-  const { setCode, cardNumber, foil } = req.params;
+  // Ensure setCode is lowercase
+  const setCode = req.params.setCode.toLowerCase();
+  const { cardNumber, foil } = req.params;
   const foilBool = foil === 'true';
   const key = getKey(setCode, cardNumber, foilBool);
   try {
@@ -318,6 +345,7 @@ router.delete('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res)
  *   get:
  *     operationId: getAllCards
  *     summary: Get all cards
+ *     description: Call this function to return all cards in the collection as a JSON object. It is an array of everything in the collection, where each object key consists of "setcode:cardnumber:foilstatus", e.g. "khm:123:foil".
  *     responses:
  *       200:
  *         description: A list of cards
