@@ -124,7 +124,7 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  *         schema:
  *           type: boolean
  *     requestBody:
- *       required: false
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
