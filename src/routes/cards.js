@@ -129,6 +129,7 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
+ *             required: ['amount']
  *             properties:
  *               amount:
  *                 type: integer
@@ -226,6 +227,7 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
  *         application/json:
  *           schema:
  *             type: object
+ *             required: ['amount']
  *             properties:
  *               amount:
  *                 type: integer
