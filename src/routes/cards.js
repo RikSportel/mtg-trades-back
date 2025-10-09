@@ -196,8 +196,8 @@ router.post('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
           finishMap[posted.finish].amount += Number(posted.amount);
           // Append notes
           if (posted.notes) {
-            const noteStr = `\n\n${datetime} ${posted.notes}`;
-            finishMap[posted.finish].notes = (finishMap[posted.finish].notes || '') + noteStr;
+            const noteStr = `${datetime} ${posted.notes}`;
+            finishMap[posted.finish].notes = (finishMap[posted.finish].notes ? finishMap[posted.finish].notes + '\n' : '') + noteStr;
           }
         } else {
           // New finish: set amount and notes
@@ -354,8 +354,8 @@ router.patch('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
         finishMap[posted.finish].amount = Number(posted.amount);
         // Append notes
         if (posted.notes) {
-          const noteStr = `\n\n${datetime} ${posted.notes}`;
-          finishMap[posted.finish].notes = (finishMap[posted.finish].notes || '') + noteStr;
+          const noteStr = `${datetime} ${posted.notes}`;
+            finishMap[posted.finish].notes = (finishMap[posted.finish].notes ? finishMap[posted.finish].notes + '\n' : '') + noteStr;
         }
       } else {
         // New finish: set amount and notes
