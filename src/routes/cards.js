@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const Card = require('../models/card');
 const { fetchScryfallCard } = require('../middleware/scryfall');
 const AuthMiddleware = require('../middleware/auth');
 const authenticateToken = AuthMiddleware.authenticateToken;
@@ -13,16 +12,13 @@ const CARDS_TABLE = 'cardsTable';
 const SCRYFALL_TTL_HOURS = 24;
 
 // Helper to get DynamoDB key
-function getKey(setCode, cardNumber, foil) {
-  // Ensure setCode is always lowercase
-  return `${setCode.toLowerCase()}:${cardNumber}:${foil ? 'foil' : 'nonfoil'}`;
+function getKey(setCode, cardNumber) {
+  return `${setCode.toLowerCase()}:${cardNumber}`;
 }
 
 // Helper to validate input
-function validateCardInput(setCode, cardNumber, foil, amount) {
-  if (typeof setCode !== 'string' || setCode.length < 1 || setCode.length > 6) return 'Invalid setCode';
-  if (!Number.isInteger(Number(cardNumber)) || Number(cardNumber) <= 0) return 'Invalid cardNumber';
-  if (typeof foil !== 'boolean') return 'Invalid foil';
+function validateCardInput(setCode, cardNumber, amount) {
+  if (typeof setCode !== 'string' || setCode.length < 1 || setCode.length > 6) return 'Invalid setCode'
   if (!Number.isInteger(Number(amount)) || Number(amount) <= 0) return 'Invalid amount';
   return null;
 }
@@ -35,11 +31,11 @@ function isScryfallExpired(card) {
 
 /**
  * @swagger
- * /cards/{setCode}/{cardNumber}/{foil}:
+ * /cards/{setCode}/{cardNumber}:
  *   get:
  *     operationId: getCard
- *     summary: Get card info by setCode, cardNumber, and foil
- *     description: Call this function to return a single card object in the collection. You need the setcode, cardnumber and foil status (true or false).
+ *     summary: Get card info by setCode and cardNumber.
+ *     description: Call this function to return a single card object in the collection. You need the setcode and cardnumber.
  *     parameters:
  *       - in: path
  *         name: setCode
@@ -53,12 +49,6 @@ function isScryfallExpired(card) {
  *         required: true
  *         schema:
  *           type: string
- *       - in: path
- *         name: foil
- *         description: Whether the card is foil (true) or non-foil (false)
- *         required: true
- *         schema:
- *           type: boolean
  *     responses:
  *       200:
  *         description: Card info
@@ -66,11 +56,11 @@ function isScryfallExpired(card) {
  *         description: Card not found
  */
 // GET: Return card info, refresh Scryfall if expired
-router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
+router.get('/:setCode/:cardNumber', async (req, res) => {
   // Ensure setCode is lowercase
   const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber, foil } = req.params;
-  const key = getKey(setCode, cardNumber, foil === 'true');
+  const { cardNumber } = req.params;
+  const key = getKey(setCode, cardNumber);
   try {
     const result = await dynamoDb.send(new GetCommand({
       TableName: CARDS_TABLE,
@@ -97,11 +87,11 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
 
 /**
  * @swagger
- * /cards/{setCode}/{cardNumber}/{foil}:
+ * /cards/{setCode}/{cardNumber}:
  *   post:
  *     operationId: createCard
  *     summary: Create or increment card (protected)
- *     description: Call this function to add a new card to the collection, or increment the amount if it already exists. If the card is new, Scryfall data will be fetched automatically. You can optionally provide an "amount" in the request body to specify how many copies to add (default is 1). You must pass card number, set code and foil status (true or false) as path parameters.
+ *     description: Call this function to add a new card to the collection, or increment the amount for a specific finish if it already exists. You must provide a "finishes" array in the request body, with at least one finish. Each finish must be an object containing "finish" (string), "amount" (integer), and optional "notes" (string). The available finishes will be validated.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -117,23 +107,30 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *       - in: path
- *         name: foil
- *         description: Whether the card is foil (true) or non-foil (false)
- *         required: true
- *         schema:
- *           type: boolean
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: ['amount']
+ *             required: ['finishes']
  *             properties:
- *               amount:
- *                 type: integer
- *                 description: Number of copies of the card to add to the collection (default is 1)
+ *               finishes:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: object
+ *                   required: ['finish', 'amount']
+ *                   properties:
+ *                     finish:
+ *                       type: string
+ *                       description: The finish type (e.g., "nonfoil", "foil", "etched", "glossy")
+ *                     amount:
+ *                       type: integer
+ *                       description: Number of copies for this finish
+ *                     notes:
+ *                       type: string
+ *                       description: Optional notes for this finish
  *     responses:
  *       200:
  *         description: Card updated
@@ -143,63 +140,113 @@ router.get('/:setCode/:cardNumber/:foil', async (req, res) => {
  *         description: Invalid input
  */
 // POST: Create or increment card (protected)
-router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
+router.post('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
   // Ensure setCode is lowercase
   const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber, foil } = req.params;
-  // If req.body is missing or amount is not provided, default to 1
-  let amount = 1;
-  if (req.body && typeof req.body.amount !== 'undefined') {
-    amount = Number(req.body.amount);
+  const { cardNumber } = req.params;
+
+  // Check for missing request body
+  if (!req.body || Object.keys(req.body).length === 0) {
+    return res.status(400).json({ error: 'Missing request body' });
   }
-  const foilBool = foil === 'true';
-  const validationError = validateCardInput(setCode, cardNumber, foilBool, amount);
-  if (validationError) return res.status(400).json({ error: validationError });
-  const key = getKey(setCode, cardNumber, foilBool);
+
+  let body = req.body;
+  const key = getKey(setCode, cardNumber)
 
   try {
     const result = await dynamoDb.send(new GetCommand({
       TableName: CARDS_TABLE,
       Key: { CardId: key }
     }));
+    console.log('Existing card:', result.Item);
     let card = result.Item;
-    if (card) {
-      card.amount += amount;
-      await dynamoDb.send(new PutCommand({
-        TableName: CARDS_TABLE,
-        Item: card
-      }));
-      return res.status(200).json(card);
+    let scryfallData;
+    if (!card || isScryfallExpired(card)) {
+      scryfallData = await fetchScryfallCard(setCode, cardNumber);
+    } else {
+      scryfallData = card.scryfall;
     }
-    // Fetch Scryfall data for new card
-    const scryfallData = await fetchScryfallCard(setCode, cardNumber);
+    console.log('Scryfall data:', scryfallData);
+    const validFinishes = Array.isArray(scryfallData.finishes) ? scryfallData.finishes : [];
+    console.log('Valid finishes:', validFinishes);
+    console.log('Posted finishes:', body.finishes);
+    for (const finishObj of body.finishes) {
+      if (!finishObj.finish || !validFinishes.includes(finishObj.finish)) {
+        return res.status(400).json({
+          error: `The finish "${finishObj.finish}" does not exist for card ${setCode}:${cardNumber}`
+        });
+      }
+    }
+
+    if (card) {
+      // Card exists: merge finishes
+      const existingFinishes = Array.isArray(card.finishes) ? card.finishes : [];
+      const now = new Date();
+      const datetime = now.toISOString().slice(0, 16).replace('T', ' ');
+
+      // Map existing finishes for quick lookup
+      const finishMap = {};
+      for (const f of existingFinishes) {
+        finishMap[f.finish] = { ...f };
+      }
+
+      for (const posted of body.finishes) {
+        if (finishMap[posted.finish]) {
+          // Increment amount
+          finishMap[posted.finish].amount += Number(posted.amount);
+          // Append notes
+          if (posted.notes) {
+            const noteStr = `\n\n${datetime} ${posted.notes}`;
+            finishMap[posted.finish].notes = (finishMap[posted.finish].notes || '') + noteStr;
+          }
+        } else {
+          // New finish: set amount and notes
+          finishMap[posted.finish] = {
+            finish: posted.finish,
+            amount: Number(posted.amount),
+            notes: posted.notes ? `${datetime} ${posted.notes}` : ''
+          };
+        }
+      }
+
+      // Convert back to array
+      body.finishes = Object.values(finishMap);
+    } else {
+      // New card: set amount and notes for each finish
+      const now = new Date();
+      const datetime = now.toISOString().slice(0, 16).replace('T', ' ');
+      body.finishes = body.finishes.map(finishObj => ({
+        ...finishObj,
+        amount: Number(finishObj.amount),
+        notes: finishObj.notes ? `${datetime} ${finishObj.notes}` : ''
+      }));
+    }
+
     card = {
       CardId: key,
-      setCode,
-      cardNumber,
-      foil: foilBool,
-      amount,
+      finishes: body.finishes,
       scryfall: scryfallData,
       scryfall_ttl: Date.now() + SCRYFALL_TTL_HOURS * 3600 * 1000
     };
+    console.log("card to save:", card);
     await dynamoDb.send(new PutCommand({
       TableName: CARDS_TABLE,
       Item: card
     }));
     res.status(201).json(card);
   } catch (err) {
-    console.error('POST /:setCode/:cardNumber/:foil error:', err); // <-- Add this line
+    console.error('POST /:setCode/:cardNumber/ error:', err);
     res.status(500).json({ error: 'DynamoDB error', details: err });
   }
 });
 
 /**
  * @swagger
- * /cards/{setCode}/{cardNumber}/{foil}:
+ * /cards/{setCode}/{cardNumber}:
  *   patch:
  *     operationId: updateCard
- *     summary: Update card amount (protected)
- *     description: Call this function to update the amount of a specific card in the collection. You must provide the new "amount" in the request body. Setting the amount to 0 will delete the card from the collection. You must pass setcode, cardnumber and foil status (true or false) as path parameters.
+ *     summary: Update card finishes and amount (protected)
+ *     description: Call this function to update the finishes and amount of a specific card in the collection. You must provide a "finishes" array in the request body, with at least one finish. Each finish must be an object containing "finish" (string), "amount" (integer), and optional "notes" (string). Setting the amount of a finish to 0 will remove that finish. If all finishes are removed, the card will be deleted.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -215,23 +262,30 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
  *         required: true
  *         schema:
  *           type: string
- *       - in: path
- *         name: foil
- *         required: true
- *         description: Whether the card is foil (true) or non-foil (false)
- *         schema:
- *           type: boolean
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: ['amount']
+ *             required: ['finishes']
  *             properties:
- *               amount:
- *                 type: integer
- *                 description: New amount, set to 0 to delete the card. This is the number of copies available of the
+ *               finishes:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: object
+ *                   required: ['finish', 'amount']
+ *                   properties:
+ *                     finish:
+ *                       type: string
+ *                       description: The finish type (e.g., "nonfoil", "foil", "etched", "glossy")
+ *                     amount:
+ *                       type: integer
+ *                       description: Number of copies for this finish (set to 0 to remove)
+ *                     notes:
+ *                       type: string
+ *                       description: Optional notes for this finish
  *     responses:
  *       200:
  *         description: Card updated
@@ -243,18 +297,21 @@ router.post('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) =
  *         description: Card not found
  */
 // PATCH: Update amount (protected)
-router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
+router.patch('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
   // Ensure setCode is lowercase
   const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber, foil } = req.params;
-  // Body is mandatory
-  if (!req.body || typeof req.body.amount === 'undefined') {
-    return res.status(400).json({ error: 'Request body with amount is required' });
+  const { cardNumber } = req.params;
+  const key = getKey(setCode, cardNumber);
+
+  // Check for missing request body
+  if (!req.body || Object.keys(req.body).length === 0) {
+    return res.status(400).json({ error: 'Missing request body' });
   }
-  let { amount } = req.body;
-  const foilBool = foil === 'true';
-  amount = Number(amount);
-  const key = getKey(setCode, cardNumber, foilBool);
+
+  let { finishes } = req.body;
+  if (!Array.isArray(finishes) || finishes.length === 0) {
+    return res.status(400).json({ error: 'finishes array required' });
+  }
 
   try {
     const result = await dynamoDb.send(new GetCommand({
@@ -263,21 +320,75 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
     }));
     let card = result.Item;
     if (!card) return res.status(404).json({ error: 'Card not found' });
-    if (typeof amount !== 'undefined') {
-      if (!Number.isInteger(amount)) return res.status(400).json({ error: 'Invalid amount' });
-      if (amount === 0) {
-        await dynamoDb.send(new DeleteCommand({
-          TableName: CARDS_TABLE,
-          Key: { CardId: key }
-        }));
-        return res.status(204).send();
-      }
-      card.amount = amount;
-      await dynamoDb.send(new PutCommand({
-        TableName: CARDS_TABLE,
-        Item: card
-      }));
+
+    // Validate finishes against Scryfall
+    let scryfallData = card.scryfall;
+    if (isScryfallExpired(card)) {
+      scryfallData = await fetchScryfallCard(setCode, cardNumber);
     }
+    const validFinishes = Array.isArray(scryfallData.finishes) ? scryfallData.finishes : [];
+    for (const finishObj of finishes) {
+      if (!finishObj.finish || !validFinishes.includes(finishObj.finish)) {
+        return res.status(400).json({
+          error: `The finish "${finishObj.finish}" does not exist for card ${setCode}:${cardNumber}`
+        });
+      }
+      if (!Number.isInteger(Number(finishObj.amount)) || Number(finishObj.amount) < 0) {
+        return res.status(400).json({ error: `Invalid amount for finish "${finishObj.finish}"` });
+      }
+    }
+
+    // Merge finishes
+    const existingFinishes = Array.isArray(card.finishes) ? card.finishes : [];
+    const finishMap = {};
+    for (const f of existingFinishes) {
+      finishMap[f.finish] = { ...f };
+    }
+
+    const now = new Date();
+    const datetime = now.toISOString().slice(0, 16).replace('T', ' ');
+
+    for (const posted of finishes) {
+      if (finishMap[posted.finish]) {
+        // Update amount
+        finishMap[posted.finish].amount = Number(posted.amount);
+        // Append notes
+        if (posted.notes) {
+          const noteStr = `\n\n${datetime} ${posted.notes}`;
+          finishMap[posted.finish].notes = (finishMap[posted.finish].notes || '') + noteStr;
+        }
+      } else {
+        // New finish: set amount and notes
+        finishMap[posted.finish] = {
+          finish: posted.finish,
+          amount: Number(posted.amount),
+          notes: posted.notes ? `${datetime} ${posted.notes}` : ''
+        };
+      }
+    }
+
+    // Remove finishes with amount 0
+    const updatedFinishes = Object.values(finishMap).filter(f => f.amount > 0);
+
+    // If no finishes remain, delete the card
+    if (updatedFinishes.length === 0) {
+      await dynamoDb.send(new DeleteCommand({
+        TableName: CARDS_TABLE,
+        Key: { CardId: key }
+      }));
+      return res.status(204).send();
+    }
+
+    // Update card
+    card.finishes = updatedFinishes;
+    card.scryfall = scryfallData;
+    card.scryfall_ttl = Date.now() + SCRYFALL_TTL_HOURS * 3600 * 1000;
+
+    await dynamoDb.send(new PutCommand({
+      TableName: CARDS_TABLE,
+      Item: card
+    }));
+
     res.json(card);
   } catch (err) {
     res.status(500).json({ error: 'DynamoDB error', details: err });
@@ -286,11 +397,11 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
 
 /**
  * @swagger
- * /cards/{setCode}/{cardNumber}/{foil}:
+ * /cards/{setCode}/{cardNumber}:
  *   delete:
  *     operationId: deleteCard
  *     summary: Delete card (protected)
- *     description: Call this function to delete a specific card from the collection. You need to pass card number, set code and foil status (true or false) as path parameters.
+ *     description: Call this function to delete a specific card from the collection. You need to pass card number and set code as path parameters.
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -306,12 +417,6 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
  *         required: true
  *         schema:
  *           type: string
- *       - in: path
- *         name: foil
- *         description: Whether the card is foil (true) or non-foil (false)
- *         required: true
- *         schema:
- *           type: boolean
  *     responses:
  *       204:
  *         description: Card deleted
@@ -319,12 +424,11 @@ router.patch('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) 
  *         description: Card not found
  */
 // DELETE: Remove card (protected)
-router.delete('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res) => {
+router.delete('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
   // Ensure setCode is lowercase
   const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber, foil } = req.params;
-  const foilBool = foil === 'true';
-  const key = getKey(setCode, cardNumber, foilBool);
+  const { cardNumber } = req.params;
+  const key = getKey(setCode, cardNumber);
   try {
     const result = await dynamoDb.send(new GetCommand({
       TableName: CARDS_TABLE,
@@ -347,7 +451,7 @@ router.delete('/:setCode/:cardNumber/:foil', authenticateToken, async (req, res)
  *   get:
  *     operationId: getAllCards
  *     summary: Get all cards
- *     description: Call this function to return all cards in the collection as a JSON object. It is an array of everything in the collection, where each object key consists of "setcode:cardnumber:foilstatus", e.g. "khm:123:foil".
+ *     description: Call this function to return all cards in the collection as a JSON object. It is an array of everything in the collection, where each object key consists of "setcode:cardnumber", e.g. "khm:123".
  *     responses:
  *       200:
  *         description: A list of cards

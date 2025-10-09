@@ -77,18 +77,12 @@ app.get('/gettoken', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('Hello World!');
+  res.send('Welcome to the MTG Trades back-end. See /api-docs for API documentation. \nThe Swagger spec is available at /api-docs/swagger.json\n\nT1 Swamp Ritual Thoughtseize Hymn.');
 });
 
 // Cards RESTful API
 const cardsRouter = require('./routes/cards');
 app.use('/cards', cardsRouter);
-
-app.get('/card/:setCode/:cardNumber', async (req, res) => {
-  const { setCode, cardNumber } = req.params;
-  const cardData = await fetchScryfallCard(setCode, cardNumber);
-  res.send(cardData || { error: 'Card not found' });
-});
 
 const swaggerOptions = {
   definition: {
@@ -112,7 +106,11 @@ app.get('/api-docs/swagger.json', (req, res) => {
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-//app.listen(port, () => {
-//  console.log(`MTG backend listening on port ${port}`);
-//});
+if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  // Running in AWS Lambda, do not start server
+} else {
+  app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
+}
 module.exports = app;
