@@ -77,7 +77,7 @@ app.get('/gettoken', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('Welcome to the MTG Trades back-end. See /api-docs for API documentation. \nThe Swagger spec is available at /api-docs/swagger.json\n\nT1 Swamp Ritual Thoughtseize Hymn.');
+  res.send('<html><head><title>T1 Swamp Ritual Thoughtseize Hymn</title></head><body>Welcome to the MTG Trades back-end. See /api-docs for API documentation. <br /><br />The Swagger spec is available at /api-docs/swagger.json<br /><br />You can\'t play if you don\'t have cards in hand.</body></html>');
 });
 
 // Cards RESTful API

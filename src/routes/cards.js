@@ -1,33 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { fetchScryfallCard } = require('../middleware/scryfall');
 const AuthMiddleware = require('../middleware/auth');
 const authenticateToken = AuthMiddleware.authenticateToken;
-const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, ScanCommand } = require("@aws-sdk/lib-dynamodb");
-
-const client = new DynamoDBClient({ region: "eu-central-1" });
-const dynamoDb = DynamoDBDocumentClient.from(client);
-const CARDS_TABLE = 'cardsTable';
-const SCRYFALL_TTL_HOURS = 24;
-
-// Helper to get DynamoDB key
-function getKey(setCode, cardNumber) {
-  return `${setCode.toLowerCase()}:${cardNumber}`;
-}
-
-// Helper to validate input
-function validateCardInput(setCode, cardNumber, amount) {
-  if (typeof setCode !== 'string' || setCode.length < 1 || setCode.length > 6) return 'Invalid setCode'
-  if (!Number.isInteger(Number(amount)) || Number(amount) <= 0) return 'Invalid amount';
-  return null;
-}
-
-// Helper to check TTL
-function isScryfallExpired(card) {
-  if (!card.scryfall || !card.scryfall_ttl) return true;
-  return Date.now() > card.scryfall_ttl;
-}
+const { getCard, post, patch, deleteCard, getAll } = require('../controllers/cardsController');
 
 /**
  * @swagger
@@ -56,34 +31,7 @@ function isScryfallExpired(card) {
  *         description: Card not found
  */
 // GET: Return card info, refresh Scryfall if expired
-router.get('/:setCode/:cardNumber', async (req, res) => {
-  // Ensure setCode is lowercase
-  const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber } = req.params;
-  const key = getKey(setCode, cardNumber);
-  try {
-    const result = await dynamoDb.send(new GetCommand({
-      TableName: CARDS_TABLE,
-      Key: { CardId: key }
-    }));
-    let card = result.Item;
-    if (!card) return res.status(404).json({ error: 'Card not found' });
-
-    // Refresh Scryfall if expired
-    if (isScryfallExpired(card)) {
-      const scryfallData = await fetchScryfallCard(setCode, cardNumber);
-      card.scryfall = scryfallData;
-      card.scryfall_ttl = Date.now() + SCRYFALL_TTL_HOURS * 3600 * 1000;
-      await dynamoDb.send(new PutCommand({
-        TableName: CARDS_TABLE,
-        Item: card
-      }));
-    }
-    res.json(card);
-  } catch (err) {
-    res.status(500).json({ error: 'DynamoDB error', details: err });
-  }
-});
+router.get('/:setCode/:cardNumber', getCard);
 
 /**
  * @swagger
@@ -112,25 +60,7 @@ router.get('/:setCode/:cardNumber', async (req, res) => {
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required: ['finishes']
- *             properties:
- *               finishes:
- *                 type: array
- *                 minItems: 1
- *                 items:
- *                   type: object
- *                   required: ['finish', 'amount']
- *                   properties:
- *                     finish:
- *                       type: string
- *                       description: The finish type (e.g., "nonfoil", "foil", "etched", "glossy")
- *                     amount:
- *                       type: integer
- *                       description: Number of copies for this finish
- *                     notes:
- *                       type: string
- *                       description: Optional notes for this finish
+ *             $ref: '#/components/schemas/Card'
  *     responses:
  *       200:
  *         description: Card updated
@@ -140,105 +70,37 @@ router.get('/:setCode/:cardNumber', async (req, res) => {
  *         description: Invalid input
  */
 // POST: Create or increment card (protected)
-router.post('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
-  // Ensure setCode is lowercase
-  const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber } = req.params;
+router.post('/:setCode/:cardNumber', authenticateToken, post);
 
-  // Check for missing request body
-  if (!req.body || Object.keys(req.body).length === 0) {
-    return res.status(400).json({ error: 'Missing request body' });
-  }
-
-  let body = req.body;
-  const key = getKey(setCode, cardNumber)
-
-  try {
-    const result = await dynamoDb.send(new GetCommand({
-      TableName: CARDS_TABLE,
-      Key: { CardId: key }
-    }));
-    console.log('Existing card:', result.Item);
-    let card = result.Item;
-    let scryfallData;
-    if (!card || isScryfallExpired(card)) {
-      scryfallData = await fetchScryfallCard(setCode, cardNumber);
-    } else {
-      scryfallData = card.scryfall;
-    }
-    console.log('Scryfall data:', scryfallData);
-    const validFinishes = Array.isArray(scryfallData.finishes) ? scryfallData.finishes : [];
-    console.log('Valid finishes:', validFinishes);
-    console.log('Posted finishes:', body.finishes);
-    for (const finishObj of body.finishes) {
-      if (!finishObj.finish || !validFinishes.includes(finishObj.finish)) {
-        return res.status(400).json({
-          error: `The finish "${finishObj.finish}" does not exist for card ${setCode}:${cardNumber}`
-        });
-      }
-    }
-
-    if (card) {
-      // Card exists: merge finishes
-      const existingFinishes = Array.isArray(card.finishes) ? card.finishes : [];
-      const now = new Date();
-      const datetime = now.toISOString().slice(0, 16).replace('T', ' ');
-
-      // Map existing finishes for quick lookup
-      const finishMap = {};
-      for (const f of existingFinishes) {
-        finishMap[f.finish] = { ...f };
-      }
-
-      for (const posted of body.finishes) {
-        if (finishMap[posted.finish]) {
-          // Increment amount
-          finishMap[posted.finish].amount += Number(posted.amount);
-          // Append notes
-          if (posted.notes) {
-            const noteStr = `${datetime} ${posted.notes}`;
-            finishMap[posted.finish].notes = (finishMap[posted.finish].notes ? finishMap[posted.finish].notes + '\n' : '') + noteStr;
+// Card schema for Swagger (reusable)
+const cardSchema = {
+  type: 'object',
+  required: ['finishes'],
+  properties: {
+    finishes: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        required: ['finish', 'amount'],
+        properties: {
+          finish: {
+            type: 'string',
+            description: 'The finish type (e.g., "nonfoil", "foil", "etched", "glossy")'
+          },
+          amount: {
+            type: 'integer',
+            description: 'Number of copies for this finish (set to 0 to remove)'
+          },
+          notes: {
+            type: 'string',
+            description: 'Optional notes for this finish'
           }
-        } else {
-          // New finish: set amount and notes
-          finishMap[posted.finish] = {
-            finish: posted.finish,
-            amount: Number(posted.amount),
-            notes: posted.notes ? `${datetime} ${posted.notes}` : ''
-          };
         }
       }
-
-      // Convert back to array
-      body.finishes = Object.values(finishMap);
-    } else {
-      // New card: set amount and notes for each finish
-      const now = new Date();
-      const datetime = now.toISOString().slice(0, 16).replace('T', ' ');
-      body.finishes = body.finishes.map(finishObj => ({
-        ...finishObj,
-        amount: Number(finishObj.amount),
-        notes: finishObj.notes ? `${datetime} ${finishObj.notes}` : ''
-      }));
     }
-
-    card = {
-      CardId: key,
-      finishes: body.finishes,
-      scryfall: scryfallData,
-      scryfall_ttl: Date.now() + SCRYFALL_TTL_HOURS * 3600 * 1000
-    };
-    console.log("card to save:", card);
-    await dynamoDb.send(new PutCommand({
-      TableName: CARDS_TABLE,
-      Item: card
-    }));
-    res.status(201).json(card);
-  } catch (err) {
-    console.error('POST /:setCode/:cardNumber/ error:', err);
-    res.status(500).json({ error: 'DynamoDB error', details: err });
   }
-});
+};
 
 /**
  * @swagger
@@ -267,25 +129,7 @@ router.post('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required: ['finishes']
- *             properties:
- *               finishes:
- *                 type: array
- *                 minItems: 1
- *                 items:
- *                   type: object
- *                   required: ['finish', 'amount']
- *                   properties:
- *                     finish:
- *                       type: string
- *                       description: The finish type (e.g., "nonfoil", "foil", "etched", "glossy")
- *                     amount:
- *                       type: integer
- *                       description: Number of copies for this finish (set to 0 to remove)
- *                     notes:
- *                       type: string
- *                       description: Optional notes for this finish
+ *             $ref: '#/components/schemas/Card'
  *     responses:
  *       200:
  *         description: Card updated
@@ -296,105 +140,9 @@ router.post('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
  *       404:
  *         description: Card not found
  */
+
 // PATCH: Update amount (protected)
-router.patch('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
-  // Ensure setCode is lowercase
-  const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber } = req.params;
-  const key = getKey(setCode, cardNumber);
-
-  // Check for missing request body
-  if (!req.body || Object.keys(req.body).length === 0) {
-    return res.status(400).json({ error: 'Missing request body' });
-  }
-
-  let { finishes } = req.body;
-  if (!Array.isArray(finishes) || finishes.length === 0) {
-    return res.status(400).json({ error: 'finishes array required' });
-  }
-
-  try {
-    const result = await dynamoDb.send(new GetCommand({
-      TableName: CARDS_TABLE,
-      Key: { CardId: key }
-    }));
-    let card = result.Item;
-    if (!card) return res.status(404).json({ error: 'Card not found' });
-
-    // Validate finishes against Scryfall
-    let scryfallData = card.scryfall;
-    if (isScryfallExpired(card)) {
-      scryfallData = await fetchScryfallCard(setCode, cardNumber);
-    }
-    const validFinishes = Array.isArray(scryfallData.finishes) ? scryfallData.finishes : [];
-    for (const finishObj of finishes) {
-      if (!finishObj.finish || !validFinishes.includes(finishObj.finish)) {
-        return res.status(400).json({
-          error: `The finish "${finishObj.finish}" does not exist for card ${setCode}:${cardNumber}`
-        });
-      }
-      if (!Number.isInteger(Number(finishObj.amount)) || Number(finishObj.amount) < 0) {
-        return res.status(400).json({ error: `Invalid amount for finish "${finishObj.finish}"` });
-      }
-    }
-
-    // Merge finishes
-    const existingFinishes = Array.isArray(card.finishes) ? card.finishes : [];
-    const finishMap = {};
-    for (const f of existingFinishes) {
-      finishMap[f.finish] = { ...f };
-    }
-
-    const now = new Date();
-    const datetime = now.toISOString().slice(0, 16).replace('T', ' ');
-
-    for (const posted of finishes) {
-      if (finishMap[posted.finish]) {
-        // Update amount
-        finishMap[posted.finish].amount = Number(posted.amount);
-        // Append notes
-        if (posted.notes) {
-          const noteStr = `${datetime} ${posted.notes}`;
-            finishMap[posted.finish].notes = (finishMap[posted.finish].notes ? finishMap[posted.finish].notes + '\n' : '') + noteStr;
-        }
-      } else {
-        // New finish: set amount and notes
-        finishMap[posted.finish] = {
-          finish: posted.finish,
-          amount: Number(posted.amount),
-          notes: posted.notes ? `${datetime} ${posted.notes}` : ''
-        };
-      }
-    }
-
-    // Remove finishes with amount 0
-    const updatedFinishes = Object.values(finishMap).filter(f => f.amount > 0);
-
-    // If no finishes remain, delete the card
-    if (updatedFinishes.length === 0) {
-      await dynamoDb.send(new DeleteCommand({
-        TableName: CARDS_TABLE,
-        Key: { CardId: key }
-      }));
-      return res.status(204).send();
-    }
-
-    // Update card
-    card.finishes = updatedFinishes;
-    card.scryfall = scryfallData;
-    card.scryfall_ttl = Date.now() + SCRYFALL_TTL_HOURS * 3600 * 1000;
-
-    await dynamoDb.send(new PutCommand({
-      TableName: CARDS_TABLE,
-      Item: card
-    }));
-
-    res.json(card);
-  } catch (err) {
-    res.status(500).json({ error: 'DynamoDB error', details: err });
-  }
-});
-
+router.patch('/:setCode/:cardNumber', authenticateToken, patch);
 /**
  * @swagger
  * /cards/{setCode}/{cardNumber}:
@@ -424,26 +172,7 @@ router.patch('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
  *         description: Card not found
  */
 // DELETE: Remove card (protected)
-router.delete('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
-  // Ensure setCode is lowercase
-  const setCode = req.params.setCode.toLowerCase();
-  const { cardNumber } = req.params;
-  const key = getKey(setCode, cardNumber);
-  try {
-    const result = await dynamoDb.send(new GetCommand({
-      TableName: CARDS_TABLE,
-      Key: { CardId: key }
-    }));
-    if (!result.Item) return res.status(404).json({ error: 'Card not found' });
-    await dynamoDb.send(new DeleteCommand({
-      TableName: CARDS_TABLE,
-      Key: { CardId: key }
-    }));
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: 'DynamoDB error', details: err });
-  }
-});
+router.delete('/:setCode/:cardNumber', authenticateToken, deleteCard);
 
 /**
  * @swagger
@@ -457,18 +186,150 @@ router.delete('/:setCode/:cardNumber', authenticateToken, async (req, res) => {
  *         description: A list of cards
  */
 // Export all cards as JSON
-router.get('/', async (req, res) => {
-  try {
-    const result = await dynamoDb.send(new ScanCommand({ TableName: CARDS_TABLE }));
-    // Return as { [CardId]: card }
-    const cardsObj = {};
-    for (const card of result.Items) {
-      cardsObj[card.CardId] = card;
-    }
-    res.json(cardsObj);
-  } catch (err) {
-    res.status(500).json({ error: 'DynamoDB error', details: err });
+router.get('/', getAll);
+
+/**
+ * @swagger
+ * /cards/batch:
+ *   post:
+ *     operationId: batchCards
+ *     summary: Batch process card operations
+ *     description: >-
+ *       Accepts a batch of card operations (create, update, delete) and processes them sequentially. Each operation must specify a type (create, update, delete), setcode, cardNumber, and a body (for create/update).
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [operations]
+ *             properties:
+ *               operations:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: object
+ *                   required: [type, setcode, cardNumber]
+ *                   properties:
+ *                     type:
+ *                       type: string
+ *                       enum: [create, update, delete]
+ *                       description: The operation type to perform.
+ *                     setcode:
+ *                       type: string
+ *                       description: The set code of the card (e.g., "KHM")
+ *                     cardNumber:
+ *                       type: string
+ *                       description: The card number within the set (e.g., "123")
+ *                     body:
+ *                       $ref: '#/components/schemas/Card'
+ *     responses:
+ *       200:
+ *         description: Batch operation results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 results:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       type:
+ *                         type: string
+ *                       setcode:
+ *                         type: string
+ *                       cardNumber:
+ *                         type: string
+ *                       result:
+ *                         type: object
+ *       400:
+ *         description: Invalid input
+ */
+router.post('/batch', authenticateToken, async (req, res) => {
+  const { operations } = req.body;
+  if (!Array.isArray(operations)) {
+    return res.status(400).json({ error: 'Missing or invalid operations array.' });
   }
+
+  const results = [];
+  for (const op of operations) {
+    const { type, setcode, cardNumber, body } = op;
+    let result;
+    // Create mock req/res objects for each operation
+    const mockReq = {
+      params: { setCode: setcode, cardNumber },
+      body: body || {},
+      user: req.user // pass auth context if needed
+    };
+    const mockRes = {
+      status: (code) => {
+        result = { status: code };
+        return mockRes;
+      },
+      json: (data) => {
+        result = { ...result, ...data };
+        return result;
+      },
+      send: (data) => {
+        result = { ...result, data };
+        return result;
+      }
+    };
+    try {
+      switch (type) {
+        case 'create':
+          await post(mockReq, mockRes);
+          break;
+        case 'update':
+          await patch(mockReq, mockRes);
+          break;
+        case 'delete':
+          await deleteCard(mockReq, mockRes);
+          break;
+        default:
+          result = { error: `Unknown operation type: ${type}` };
+      }
+    } catch (err) {
+      result = { error: err.message };
+    }
+    results.push({ type, setcode, cardNumber, result });
+  }
+  res.json({ results });
 });
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Finish:
+ *       type: object
+ *       required:
+ *         - finish
+ *         - amount
+ *       properties:
+ *         finish:
+ *           type: string
+ *           description: The finish type (e.g., "nonfoil", "foil", "etched", "glossy")
+ *         amount:
+ *           type: integer
+ *           description: Number of copies for this finish
+ *         notes:
+ *           type: string
+ *           description: Optional notes for this finish
+ *     Card:
+ *       type: object
+ *       required:
+ *         - finishes
+ *       properties:
+ *         finishes:
+ *           type: array
+ *           minItems: 1
+ *           items:
+ *             $ref: '#/components/schemas/Finish'
+ */
 
 module.exports = router;
